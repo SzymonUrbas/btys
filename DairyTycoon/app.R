@@ -3,6 +3,8 @@ library(shinyjs)
 Nplayer = 6
 Nmilk = 4
 
+ColPal = palette.colors(palette = "Okabe-Ito")
+
 mostProbCol = function(MilkMatrix){
   freqTab = rep(0,ncol(MilkMatrix))
   nmc = 1e3
@@ -21,7 +23,7 @@ ui <- fluidPage(
   shinyjs::useShinyjs(),
 
   # App title ----
-  titlePanel("Pick the best"),
+  titlePanel("Dairy Dynamics: Select the milk sample to get the highest score"),
   wellPanel(
 
   # Sidebar layout with input and output definitions ----
@@ -30,13 +32,14 @@ ui <- fluidPage(
     # Sidebar panel for inputs ----
     sidebarPanel(
 
-      actionButton("updateData", "NEXT DATA"),
-      actionButton("updateChoice", "NEXT CHOICE"),
-      actionButton('resetButton',"BigBoyReset"),
+      actionButton("updateData", "Next round"),
+      actionButton("updateChoice", "Submit choice"),
+      actionButton('resetButton',"RESTART"),
 
       # Input: Selector for milk ----
       selectInput("choice", "Make your choice:",
-                  c(1:Nmilk))
+                  c(1:Nmilk)),
+      helpText("True values will be revealed after submitting a choice"),
 
       
       # actionButton("Button1", "Run"),
@@ -49,17 +52,22 @@ ui <- fluidPage(
       # Output: Tabset w/ plot, summary, and table ----
       tabsetPanel(type = "tabs",
                   tabPanel("Plot", plotOutput("plot")),
-                  tabPanel("Summary", verbatimTextOutput("summary")),
-                  tabPanel("Table", tableOutput("table"))
+                  tabPanel("Summary", verbatimTextOutput("summary"))
       )
 
     )
-  )),
-  wellPanel(
-    fluidRow(verbatimTextOutput("phase"))
-  ),
+  ))
+  # ,
+  # # wellPanel(
+  # #   fluidRow(verbatimTextOutput("phase"))
+  # # )
+  ,
   wellPanel(
     fluidRow(tableOutput("Results"))
+  )
+  ,
+  wellPanel(
+    fluidRow(plotOutput("ResultsPlot"))
   )
 
 )
@@ -70,11 +78,12 @@ server <- function(input, output, session) {
   Accrued = reactiveVal(rep(0,Nplayer+1))
   Niter = reactiveVal(0)
 
+  RunningAverage = reactiveVal(numeric(0))
+
 
   currPhase = reactiveVal(TRUE) # !resultPhase
 
   currResult = reactiveVal(NULL)
-
 
   NPCchoice = reactiveVal(NULL)
   shinyjs::disable("updateData")
@@ -83,7 +92,7 @@ server <- function(input, output, session) {
   mus = rnorm(Nmilk)+100
   sig = 1/rgamma(Nmilk, 5, 5)
 
-  x = matrix(rnorm(1e2*Nmilk,mus, sig),nrow = 1e3, ncol = Nmilk,
+  x = matrix(rnorm(3e2*Nmilk,mus, sig),nrow = 3e3, ncol = Nmilk,
             byrow = TRUE)
   # boxplot(x)
   MilkMatrix <- reactiveVal(x)
@@ -156,6 +165,9 @@ server <- function(input, output, session) {
 
     
     Niter(Niter()+1)
+    RunningAverage(cbind(RunningAverage(),Accrued()/Niter()))
+
+
     shinyjs::disable("updateChoice")
     shinyjs::enable("updateData")
   })
@@ -168,15 +180,43 @@ server <- function(input, output, session) {
   # both tracked, and all expressions are called in the sequence
   # implied by the dependency graph.
   output$plot <- renderPlot({
-    boxplot(MilkMatrix())
-    if(!currPhase()){
-      points(1:Nmilk, MilkMatrix()[currResult(),], lwd = 3, cex = 1.5,
-        col = 'red')
-      points(as.numeric(input$choice), MilkMatrix()[currResult(),][as.numeric(input$choice)],
-         col = 'blue', lwd = 3, pch = 3)
+    # boxplot(MilkMatrix())
+    yrng = range(MilkMatrix())
+    yrng[2] = yrng[2]+3
+    plot(0,0, type = 'l', xlim = c(0.8,Nmilk+0.2), ylim = yrng,
+      xlab = 'Milk option', ylab = 'Predicted Score', xaxt = 'n',
+      cex.lab = 1.4)
+    axis(1, at = 1:4, las = 1)
+    abline(h = seq(floor(yrng[1]), ceiling(yrng[2])), lty = 2,
+     col = 'grey', lwd = 0.5)
+    for(i in seq(Nmilk)){
+      lines(c(i,i), quantile(MilkMatrix()[,i],c(0.025,0.975)),
+       type = 'l', lwd = 18, col = 'grey')
+      points(c(i,i), quantile(MilkMatrix()[,i],c(0.025,0.975)),
+       lwd = 5, pch = c(24,25), cex = 1.5, bg = 'black')
+      points(i, mean(MilkMatrix()[,i]), pch = 16, cex = 3)
+    }
 
-      points(NPCchoice(), MilkMatrix()[currResult(),][NPCchoice()],
-         col = 'green', lwd = 3, pch = 3)
+
+
+    if(!currPhase()){
+      points(1:Nmilk, MilkMatrix()[currResult(),], lwd = 4, cex = 3,
+        bg = 'red', pch = 23, col = 'white')
+      ChoiceCounts = rep(0,Nmilk)
+      text(as.numeric(input$choice),yrng[2], "Player", cex = 1.5)
+      ChoiceCounts[as.numeric(input$choice)] = ChoiceCounts[as.numeric(input$choice)]+1
+
+      for(i in seq(Nplayer)){
+        NPCtmp = as.numeric(NPCchoice()[i])
+        text(NPCtmp,yrng[2] - diff(yrng)*0.06*ChoiceCounts[NPCtmp], paste0("NPC ",i), cex = 1.5,
+          col = ColPal[i+1])
+        ChoiceCounts[NPCtmp] = ChoiceCounts[NPCtmp]+1
+      }
+      # points(as.numeric(input$choice), MilkMatrix()[currResult(),][as.numeric(input$choice)],
+      #    col = 'blue', lwd = 3, pch = 3)
+
+      # points(NPCchoice(), MilkMatrix()[currResult(),][NPCchoice()],
+      #    col = 'green', lwd = 3, pch = 3)
 
     }
   })
@@ -186,10 +226,10 @@ server <- function(input, output, session) {
     summary(MilkMatrix())
   })
 
-  # Generate an HTML table view of the data ----
-  output$table <- renderTable({
-    head(MilkMatrix())
-  })
+  # # Generate an HTML table view of the data ----
+  # output$table <- renderTable({
+  #   head(MilkMatrix())
+  # })
 
   output$Results <- renderTable({
     # tmp = Accrued()
@@ -197,7 +237,48 @@ server <- function(input, output, session) {
     # tmp
     tmp = data.frame(matrix(Accrued(),1,Nplayer+1))
     colnames(tmp) = c("Player", paste0("NPC_",1:Nplayer))
+    rownames(tmp) = c("Total score")
     tmp
+  }, rownames = TRUE)
+
+  output$ResultsPlot <- renderPlot({
+    # print(paste0("Niter():",as.numeric(Niter())))
+    # print(paste0("RunningAverage():",as.matrix(RunningAverage())))
+    Iter = as.numeric(Niter())
+    CurrRA = as.matrix(RunningAverage())
+    if(Iter == 0){
+      plot(0,0, type = 'l', xlab = '', ylab = '', xaxt = 'n', yaxt = 'n',
+        main = 'Play the game to see results')
+      # text(0,0, 'Play the game to see results', cex = 3)
+    } else if(Iter<11) {
+      # print(Iter)
+      plot(0,0, type = 'l', ylim = range(CurrRA), xlim = c(1,(Iter)),
+        xlab = 'Round', main = 'Running average results', ylab = '')
+        for(i in 1:(Nplayer+1)){
+          lines(1:Iter, CurrRA[i,], col = i, lty = i, lwd = 3)
+          points(Iter, CurrRA[i,Iter], col = i, lwd = 3, cex = 2, pch = 16)
+        }
+        legend('topleft', legend = c('Player', paste('NPC', seq(Nplayer))),
+                lty = 1:8, col = ColPal[1:8], lwd =3, pch = 16)
+
+    } else {
+      plot(0,0, type = 'l', ylim = range(CurrRA[,(Iter-10):Iter]), xlim = c(Iter-10,Iter),
+        xlab = 'Round', main = 'Running average results', ylab = '')
+      for(i in (Nplayer+1):1){
+        lines((Iter-10):Iter, CurrRA[i,(Iter-10):Iter], col = ColPal[i], lty = i, lwd = 3)
+        points(Iter, CurrRA[i,Iter], col = ColPal[i], lwd = 3, cex = 2, pch = 16)
+      }
+      legend('topleft', legend = c('Player', paste('NPC', seq(Nplayer))),
+              lty = 1:8, col = ColPal[1:8], lwd =3, pch = 16)
+
+    }
+    
+    # tmp = Accrued()
+    # names(tmp) = c("Player", paste0("NPC_",1:Nplayer))
+    # tmp
+    # tmp = data.frame(matrix(Accrued(),1,Nplayer+1))
+    # colnames(tmp) = c("Player", paste0("NPC_",1:Nplayer))
+    # tmp
   })
 
 
